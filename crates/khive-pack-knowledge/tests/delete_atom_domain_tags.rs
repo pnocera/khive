@@ -143,7 +143,10 @@ async fn near_marker_and_ordinary_tags_allow_deletion_by_slug_and_uuid() {
                 .dispatch("knowledge.delete_atoms", json!({"ids": [key]}))
                 .await
                 .expect("ordinary tagged atom can be deleted");
-            assert_eq!(response, json!({"deleted": 1, "requested": 1}));
+            assert_eq!(
+                response,
+                json!({"deleted": 1, "requested": 1, "not_found": []})
+            );
             for lookup in [id, slug.as_str()] {
                 assert!(matches!(
                     fixture
@@ -168,7 +171,7 @@ async fn near_marker_and_ordinary_tags_allow_deletion_by_slug_and_uuid() {
                     .dispatch("knowledge.delete_atoms", json!({"ids": [key]}))
                     .await
                     .unwrap(),
-                json!({"deleted": 0, "requested": 1})
+                json!({"deleted": 0, "requested": 1, "not_found": [key]})
             );
         }
     }
@@ -259,4 +262,29 @@ async fn real_domains_remain_protected_before_any_atom_is_deleted() {
             "knowledge.delete_atoms cannot delete domain {key:?}; use the generic delete verb by domain UUID"
         )).await;
     }
+}
+
+#[tokio::test]
+async fn short_id_prefix_deletes_and_misses_are_reported() {
+    let fixture = Fixture::new();
+    let atom = fixture.seed("short-id-target", "ordinary").await;
+    let id = atom["id"].as_str().unwrap();
+    let response = fixture
+        .registry
+        .dispatch("knowledge.delete_atoms", json!({"ids": [&id[..8]]}))
+        .await
+        .expect("a unique 8-character prefix resolves");
+    assert_eq!(
+        response,
+        json!({"deleted": 1, "requested": 1, "not_found": []})
+    );
+    let response = fixture
+        .registry
+        .dispatch("knowledge.delete_atoms", json!({"ids": ["no-such-atom"]}))
+        .await
+        .unwrap();
+    assert_eq!(
+        response,
+        json!({"deleted": 0, "requested": 1, "not_found": ["no-such-atom"]})
+    );
 }

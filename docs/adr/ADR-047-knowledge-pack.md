@@ -7,6 +7,34 @@
 operator-opt-in intent-rephrase retrieval path while preserving original-only behavior by default
 on acceptance.
 
+## Amendment (2026-10-17): identifier parity and reported misses for `knowledge.delete_atoms`
+
+**Status: Proposed.** Not ratified.
+
+§2 specifies `delete_atoms(ids: [<slug|uuid>, ...], cascade?: true) → {deleted: N}`. At this revision
+each key is compared literally with stored ids and slugs. The 8-character short id that
+`knowledge.list` and other read surfaces display therefore matches nothing, and the reply
+`{deleted: 0, requested: 1}` gives no reason, so a caller cannot tell a miss from a success.
+
+Each key resolves with the identifier ladder of the 2026-08-06 amendment for `knowledge.get`. A
+complete UUID in any accepted spelling is normalized. For other input, an exact slug in the caller's
+namespace (domain or atom) wins. Otherwise an undashed hexadecimal string of at least eight
+characters is a UUID prefix: a unique match resolves to that UUID, and more than one distinct match
+refuses the whole request as an ambiguous prefix before anything is written. A prefix that resolves
+to a domain reaches the existing domain refusal, as its full UUID would. Deletion stays scoped to the
+caller's namespace, as it is for full UUIDs today.
+
+The reply adds `not_found`: the resolved keys, in request order, that matched no live atom in the
+caller's namespace, including keys already deleted. `deleted` and `requested` are unchanged.
+
+```
+delete_atoms(ids: [<slug|uuid|uuid-prefix>, ...], cascade?: true) → {deleted, requested, not_found}
+```
+
+Consequences: an additive response field, and a key that is an unregistered 8+ hex string now
+resolves as a prefix instead of matching nothing. A request containing an ambiguous prefix, which
+previously deleted nothing silently, is now refused.
+
 ## Amendment (2026-09-25): compose response reports the rendered atoms
 
 **Status: Accepted (2026-09-25).** Related issue: #3235. It is intended to land together with #3349, which
