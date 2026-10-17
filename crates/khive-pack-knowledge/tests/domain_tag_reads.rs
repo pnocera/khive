@@ -255,7 +255,7 @@ async fn imported_near_markers_survive_reads_and_a_deleted_cursor_boundary() {
             .dispatch("knowledge.delete_atoms", json!({"ids": [boundary]}))
             .await
             .unwrap(),
-        json!({"deleted": 1, "requested": 1})
+        json!({"deleted": 1, "requested": 1, "not_found": []})
     );
     assert!(matches!(
         f.registry

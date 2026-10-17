@@ -190,7 +190,7 @@ pub(crate) static KNOWLEDGE_HANDLERS: [HandlerDef; 22] = [
                 name: "ids",
                 param_type: "array of string",
                 required: true,
-                description: "Atom slugs or UUIDs to delete",
+                description: "Atom slugs, UUIDs, or unique 8+ hex-character UUID prefixes to delete; keys matching no live atom come back in not_found",
                 resolution_mode: IdResolutionMode::NotApplicable,
             },
             ParamDef {

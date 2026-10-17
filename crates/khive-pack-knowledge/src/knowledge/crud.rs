@@ -1255,9 +1255,58 @@ impl KnowledgeHandlers {
         let ns = token.namespace().as_str().to_owned();
         let sql = runtime.sql();
         let now = now_us();
-        // Keys are matched a chunk at a time so the namespace bind plus the key
-        // binds stay below SQLite's portable variable ceiling.
-        let keys: Vec<String> = p.ids.iter().map(|id| id.trim().to_string()).collect();
+        let mut reader = sql
+            .reader()
+            .await
+            .map_err(|e| sql_err("delete_atoms reader", e))?;
+        // Keys resolve the way knowledge.get resolves them: a UUID in any form
+        // is normalized, an exact slug wins, and 8+ hex characters are a unique
+        // UUID prefix. An ambiguous prefix refuses rather than guess on a delete.
+        let mut keys: Vec<String> = Vec::with_capacity(p.ids.len());
+        for id in &p.ids {
+            let id = id.trim().to_string();
+            if let Ok(uuid) = id.parse::<Uuid>() {
+                keys.push(uuid.to_string());
+                continue;
+            }
+            if id.len() < 8 || !id.chars().all(|c| c.is_ascii_hexdigit()) {
+                keys.push(id);
+                continue;
+            }
+            let mut is_slug = false;
+            for slug_sql in [
+                khive_runtime::sql!("knowledge_domain_get_slug"),
+                khive_runtime::sql!("knowledge_atom_get_slug"),
+            ] {
+                is_slug |= reader
+                    .query_row(SqlStatement {
+                        sql: slug_sql.into(),
+                        params: vec![SqlValue::Text(ns.clone()), SqlValue::Text(id.clone())],
+                        label: Some("knowledge.delete_atoms.slug".into()),
+                    })
+                    .await
+                    .map_err(|e| sql_err("delete_atoms slug", e))?
+                    .is_some();
+            }
+            let rows = match knowledge_get_prefix_statement(&id) {
+                Some(statement) if !is_slug => reader
+                    .query_all(statement)
+                    .await
+                    .map_err(|e| sql_err("delete_atoms prefix", e))?,
+                _ => Vec::new(),
+            };
+            let matches: Vec<String> = rows.iter().filter_map(|row| row_str(row, "id")).collect();
+            match matches.as_slice() {
+                [only] => keys.push(only.clone()),
+                [_, _, ..] => {
+                    return Err(RuntimeError::AmbiguousPrefix {
+                        prefix: id,
+                        matches: matches.iter().filter_map(|m| m.parse().ok()).collect(),
+                    })
+                }
+                [] => keys.push(id),
+            }
+        }
 
         // Preflight the full request before mutating anything: knowledge.delete_atoms
         // is documented as atom-only. A domain's canonical row and its FTS mirror
@@ -1265,10 +1314,9 @@ impl KnowledgeHandlers {
         // half of the domain while leaving knowledge_domains live — a split-brain
         // where direct lookup and search/suggest disagree. Domains must go through
         // the generic delete verb, which deletes both halves together.
-        let mut reader = sql
-            .reader()
-            .await
-            .map_err(|e| sql_err("delete_atoms reader", e))?;
+        // Keys are matched a chunk at a time so the namespace bind plus the key
+        // binds stay below SQLite's portable variable ceiling.
+        let mut found: HashSet<String> = HashSet::new();
         for chunk in keys.chunks(HYDRATION_ID_CHUNK) {
             let mut domains: HashSet<String> = HashSet::new();
             for statement in key_match_statements(
@@ -1296,6 +1344,8 @@ impl KnowledgeHandlers {
                     .await
                     .map_err(|e| sql_err("delete_atoms mirror preflight", e))?;
                 for row in &rows {
+                    found.extend(row_str(row, "id"));
+                    found.extend(row_str(row, "slug"));
                     let tags = row_str(row, "tags").unwrap_or_default();
                     if has_domain_mirror_tag(&tags) {
                         mirrors.extend(row_str(row, "id"));
@@ -1340,9 +1390,11 @@ impl KnowledgeHandlers {
             .await
             .map_err(|e| sql_err("delete_atoms update", e))? as usize;
 
+        let not_found: Vec<&String> = keys.iter().filter(|key| !found.contains(*key)).collect();
         Ok(json!({
             "deleted": deleted,
             "requested": p.ids.len(),
+            "not_found": not_found,
         }))
     }
 
