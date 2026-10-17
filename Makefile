@@ -216,9 +216,8 @@ define INSTALL_VERIFIED_ARTIFACT
 	  echo "==> ERROR: build artifact changed after verification! verified=$$VERIFIED_SHA256 current=$$SRC_SHA256"; \
 	  exit 1; \
 	fi; \
-	SRC_HASH=$$(md5 -q "$$SRC"); \
-	SRC_SIZE=$$(stat -f '%z' "$$SRC"); \
-	echo "==> Source:  $$SRC ($$SRC_HASH, $$SRC_SIZE bytes, $$VERIFIED_VERBS verified verbs)"; \
+	SRC_SIZE=$$(wc -c < "$$SRC" | tr -d ' '); \
+	echo "==> Source:  $$SRC ($$SRC_SHA256, $$SRC_SIZE bytes, $$VERIFIED_VERBS verified verbs)"; \
 	echo "==> Staging + codesigning $$DEST.new..."; \
 	cp "$$SRC" "$$DEST.new"; \
 	COPIED_SHA256=$$({ shasum -a 256 "$$DEST.new" 2>/dev/null || sha256sum "$$DEST.new"; } | awk '{print $$1}'); \
@@ -226,6 +225,10 @@ define INSTALL_VERIFIED_ARTIFACT
 	  echo "==> ERROR: staged bytes differ from the verified build artifact! verified=$$VERIFIED_SHA256 staged=$$COPIED_SHA256"; \
 	  rm -f "$$DEST.new"; \
 	  exit 1; \
+	fi; \
+	if [ "$$(uname -s)" != Darwin ] && ! command -v codesign >/dev/null 2>&1; then \
+	  echo "==> No codesign on $$(uname -s); ad-hoc signing is macOS-only, installing unsigned"; \
+	  codesign() { :; }; \
 	fi; \
 	if ! codesign -s - -f "$$DEST.new"; then \
 	  echo "==> ERROR: codesign failed on $$DEST.new — refusing to install"; \
@@ -242,7 +245,6 @@ define INSTALL_VERIFIED_ARTIFACT
 	  exit 1; \
 	fi; \
 	SIGNED_SHA256=$$({ shasum -a 256 "$$DEST.new" 2>/dev/null || sha256sum "$$DEST.new"; } | awk '{print $$1}'); \
-	STAGED_HASH=$$(md5 -q "$$DEST.new"); \
 	KHIVE_PID_FILE=$${KHIVE_PID:-$$HOME/.khive/khived.pid}; \
 	DEFAULT_SOCK=$${HOME%/}/.khive/khived.sock; \
 	SOCK=$${KHIVE_SOCKET:-$$DEFAULT_SOCK}; \
@@ -348,7 +350,7 @@ define INSTALL_VERIFIED_ARTIFACT
 	  echo "==> $$KHIVE_PID_FILE names no live process; nothing to stop."; \
 	fi; \
 	if [ -z "$$KHIVE_LOCAL_NO_START" ] && [ -z "$$MARKER_FOREIGN" ]; then \
-	  START_CWD=$${KHIVE_LOCAL_START_CWD:-$$HOME/projects}; \
+	  START_CWD=$${KHIVE_LOCAL_START_CWD:-$$HOME}; \
 	  DLOG="$$HOME/.khive/logs/kkernel-daemon-make-local-$$(date +%Y%m%d-%H%M%S).log"; \
 	  mkdir -p "$$HOME/.khive/logs"; \
 	  if [ -n "$$OLD_PACKS" ]; then \
@@ -361,7 +363,7 @@ define INSTALL_VERIFIED_ARTIFACT
 	  if [ -n "$$MARKER_OWNED" ]; then \
 	    i=0; SERVING=""; \
 	    while [ $$i -lt 40 ]; do \
-	      if [ -S "$$SOCK" ] && /usr/sbin/lsof -t "$$SOCK" >/dev/null 2>&1; then SERVING=1; break; fi; \
+	      if [ -S "$$SOCK" ] && PATH="$$PATH:/usr/sbin" lsof -t "$$SOCK" >/dev/null 2>&1; then SERVING=1; break; fi; \
 	      i=$$((i+1)); sleep 0.25; \
 	    done; \
 	    release_marker || exit 1; \
@@ -379,19 +381,14 @@ define INSTALL_VERIFIED_ARTIFACT
 	  release_marker || exit 1; \
 	  echo "==> KHIVE_LOCAL_NO_START set: not starting a replacement daemon; released $$MARKER so clients may spawn."; \
 	fi; \
-	DEST_HASH=$$(md5 -q "$$DEST"); \
-	DEST_SIZE=$$(stat -f '%z' "$$DEST"); \
-	DEST_MTIME=$$(stat -f '%Sm' "$$DEST"); \
-	if [ "$$STAGED_HASH" != "$$DEST_HASH" ]; then \
-	  echo "==> ERROR: post-mv hash drift! staged=$$STAGED_HASH dest=$$DEST_HASH"; \
-	  exit 1; \
-	fi; \
+	DEST_SIZE=$$(wc -c < "$$DEST" | tr -d ' '); \
+	DEST_MTIME=$$(date -r "$$DEST"); \
 	DEST_SHA256=$$({ shasum -a 256 "$$DEST" 2>/dev/null || sha256sum "$$DEST"; } | awk '{print $$1}'); \
 	if [ "$$SIGNED_SHA256" != "$$DEST_SHA256" ]; then \
 	  echo "==> ERROR: installed bytes differ from the verified signed artifact! signed=$$SIGNED_SHA256 installed=$$DEST_SHA256"; \
 	  exit 1; \
 	fi; \
-	echo "==> Installed: $$DEST ($$DEST_HASH, $$DEST_SIZE bytes, $$DEST_MTIME, $$VERIFIED_VERBS verified verbs)"; \
+	echo "==> Installed: $$DEST ($$DEST_SHA256, $$DEST_SIZE bytes, $$DEST_MTIME, $$VERIFIED_VERBS verified verbs)"; \
 	"$$DEST" --version
 endef
 

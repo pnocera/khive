@@ -1056,8 +1056,7 @@ class MakefileGateContractTests(unittest.TestCase):
             ):
                 env.pop(inherited, None)
             if observe_start:
-                # The default start directory does not exist in the sandbox, so
-                # the start would fail at its `cd` and read as no start at all.
+                # Start the replacement where the harness can see what it did.
                 env["KHIVE_LOCAL_START_CWD"] = str(root)
 
             khive_dir = home / ".khive"
