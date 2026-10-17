@@ -1,6 +1,8 @@
-//! Seatbelt profile rendering and binary identity rules.
+//! Sandbox profile rendering and binary identity rules.
 //!
-//! The profile is deny-default. Reads are allowed under the run directory,
+//! macOS runs under seatbelt and Linux under bubblewrap; see [`render_launch`].
+//!
+//! The seatbelt profile is deny-default. Reads are allowed under the run directory,
 //! the operator's `[exec] read_roots`, and a fixed set of system paths that a
 //! dynamically linked binary needs to start (measured on macOS 26 with the
 //! Xcode Python framework: the dyld shared cache under `/System`, `/usr/lib`,
@@ -18,6 +20,12 @@ use khive_runtime::engine_config::{ExecSectionConfig, DEFAULT_EXEC_BINARY_DIGEST
 use crate::tree::digest_hex;
 
 /// Directories every run may read: runtime necessities, never a home.
+#[cfg(target_os = "linux")]
+pub const SYSTEM_READ_ROOTS: &[&str] =
+    &["/usr", "/etc", "/bin", "/sbin", "/lib", "/lib32", "/lib64"];
+
+/// Directories every run may read: runtime necessities, never a home.
+#[cfg(not(target_os = "linux"))]
 pub const SYSTEM_READ_ROOTS: &[&str] = &[
     "/System",
     "/usr",
@@ -34,9 +42,17 @@ pub const SYSTEM_READ_ROOTS: &[&str] = &[
 /// launches under these names; other names and paths are outside these matches.
 pub const FORBIDDEN_BASENAMES: &[&str] = &["git", "gh"];
 
-/// The sandbox launcher. Every run is a child of this binary, so its absence
-/// is the whole reason the pack runs on macOS only.
+/// The sandbox launcher. Every run is a child of this binary, so a host
+/// without it cannot run anything.
+#[cfg(target_os = "linux")]
+pub const SANDBOX_EXEC: &str = "/usr/bin/bwrap";
+#[cfg(not(target_os = "linux"))]
 pub const SANDBOX_EXEC: &str = "/usr/bin/sandbox-exec";
+
+#[cfg(target_os = "linux")]
+pub const SANDBOX_NAME: &str = "the bubblewrap sandbox";
+#[cfg(not(target_os = "linux"))]
+pub const SANDBOX_NAME: &str = "the macOS seatbelt sandbox";
 
 /// Refuse before any work is done when the host has no sandbox backend.
 ///
@@ -49,10 +65,8 @@ pub fn check_backend(path: &str) -> Result<(), String> {
         return Ok(());
     }
     Err(format!(
-        "no sandbox backend on this host: every run is executed under the macOS \
-         seatbelt sandbox, which needs {path}, and this host is {os}, where that \
-         binary does not exist. Runs are macOS-only until a backend for this \
-         platform ships.",
+        "no sandbox backend on this host: every run is executed under {SANDBOX_NAME}, \
+         which needs {path}, and this host is {os}, where that binary does not exist.",
         os = std::env::consts::OS
     ))
 }
@@ -235,7 +249,134 @@ pub fn render_profile(run_dir: &Path, read_roots: &[PathBuf], never: &[PathBuf])
 /// Digest of the template with an empty run directory and no roots: names
 /// the profile shape independently of any run.
 pub fn template_digest() -> String {
-    digest_hex(render_profile(Path::new("/"), &[], &[]).as_bytes())
+    digest_hex(
+        render_launch(Path::new("/"), &[], &[], Path::new("/"))
+            .0
+            .as_bytes(),
+    )
+}
+
+/// The confinement for one run: the profile text whose digest the receipt
+/// records, and the launcher arguments that precede the tool's argv.
+#[cfg(not(target_os = "linux"))]
+pub fn render_launch(
+    run_dir: &Path,
+    read_roots: &[PathBuf],
+    never: &[PathBuf],
+    profile_path: &Path,
+) -> (String, Vec<std::ffi::OsString>) {
+    (
+        render_profile(run_dir, read_roots, never),
+        vec!["-f".into(), profile_path.into()],
+    )
+}
+
+/// The confinement for one run: the profile text whose digest the receipt
+/// records, and the launcher arguments that precede the tool's argv. On Linux
+/// the profile is the bubblewrap argv itself, NUL-joined, so the digest names
+/// exactly what was enforced.
+#[cfg(target_os = "linux")]
+pub fn render_launch(
+    run_dir: &Path,
+    read_roots: &[PathBuf],
+    never: &[PathBuf],
+    _profile_path: &Path,
+) -> (String, Vec<std::ffi::OsString>) {
+    let args = render_bwrap_args(run_dir, read_roots, never);
+    let profile = args.join("\0");
+    let mut launch: Vec<std::ffi::OsString> = args.into_iter().map(Into::into).collect();
+    launch.push("--".into());
+    (profile, launch)
+}
+
+/// Fresh user, mount, PID, network, IPC, UTS and cgroup namespaces. The
+/// filesystem holds the system roots and read roots read-only and the run
+/// directory read-write; nothing else of the host exists. The tool is PID 1's
+/// child in its own PID namespace, so every descendant dies with the run.
+#[cfg(target_os = "linux")]
+pub fn render_bwrap_args(run_dir: &Path, read_roots: &[PathBuf], never: &[PathBuf]) -> Vec<String> {
+    let s = |p: &Path| p.to_string_lossy().to_string();
+    let mut args: Vec<String> = [
+        "--unshare-all",
+        "--die-with-parent",
+        "--new-session",
+        "--dev",
+        "/dev",
+        "--proc",
+        "/proc",
+    ]
+    .map(String::from)
+    .to_vec();
+    let mut bound: Vec<PathBuf> = Vec::new();
+    for root in SYSTEM_READ_ROOTS.iter().map(Path::new) {
+        // Merged-/usr hosts make /bin, /lib and friends symlinks; recreate the
+        // link instead of binding the same tree twice.
+        if let Ok(target) = std::fs::read_link(root) {
+            args.extend(["--symlink".into(), s(&target), s(root)]);
+        } else if root.is_dir() {
+            args.extend(["--ro-bind".into(), s(root), s(root)]);
+            bound.push(root.to_path_buf());
+        }
+    }
+    for root in read_roots {
+        args.extend(["--ro-bind".into(), s(root), s(root)]);
+        bound.push(root.clone());
+    }
+    args.extend(["--bind".into(), s(run_dir), s(run_dir)]);
+    // Seatbelt refuses any exec named git, gh or git-*; bubblewrap matches
+    // paths, not names, so hide the copies the read-only roots expose.
+    // shortcut: a git binary copied into the run directory under any name
+    // still runs; close it with Landlock or seccomp if that matters.
+    for root in &bound {
+        for name in [
+            "git",
+            "gh",
+            "bin/git",
+            "bin/gh",
+            "local/bin/git",
+            "local/bin/gh",
+        ] {
+            let path = root.join(name);
+            if path.is_file() {
+                args.extend(["--ro-bind".into(), "/dev/null".into(), s(&path)]);
+            }
+        }
+        for name in ["lib/git-core", "libexec/git-core"] {
+            let path = root.join(name);
+            if path.is_dir() {
+                args.extend(["--tmpfs".into(), s(&path), "--remount-ro".into(), s(&path)]);
+            }
+        }
+    }
+    for path in never {
+        if path.is_file() && bound.iter().any(|root| path.starts_with(root)) {
+            args.extend(["--ro-bind".into(), "/dev/null".into(), s(path)]);
+        }
+    }
+    // bwrap's root is a writable tmpfs holding the mount points; a symlink
+    // escaping the run directory would otherwise write there.
+    args.extend(["--remount-ro".into(), "/".into()]);
+    args
+}
+
+/// The tool's exit code and terminating signal as the launcher reports them.
+#[cfg(target_os = "linux")]
+pub fn tool_status(status: std::process::ExitStatus) -> (Option<i32>, Option<i32>) {
+    use std::os::unix::process::ExitStatusExt;
+    match (status.code(), status.signal()) {
+        // bwrap reports a signalled tool as exit 128 + signal.
+        // shortcut: a tool that exits above 128 by itself reads as signalled;
+        // bwrap reports no separate signal status.
+        (Some(code), None) if code > 128 => (None, Some(code - 128)),
+        other => other,
+    }
+}
+
+/// The tool's exit code and terminating signal as the launcher reports them.
+#[cfg(not(target_os = "linux"))]
+pub fn tool_status(status: std::process::ExitStatus) -> (Option<i32>, Option<i32>) {
+    use std::os::unix::process::ExitStatusExt;
+    (status.code(), status.signal())
 }
 
 /// Why a registered binary may not run.

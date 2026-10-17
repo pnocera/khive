@@ -860,3 +860,66 @@ certification.
 Implementation released by this ratification is receipt-only, with the tests this amendment lists
 for the receipt vocabulary, `seen_alive` preservation, historical receipts and the uniform
 publication policy, plus the reserved-value test above.
+
+## Amendment 13 (2026-10-17): a bubblewrap backend for Linux
+
+**Status: Proposed.** Not ratified. It replaces "a Linux profile is a later slice" (Known rough
+edges) and the startup refusal on Linux hosts that Amendment 12 describes, for hosts that have
+`/usr/bin/bwrap`. A Linux host without it still refuses in preflight, naming the platform and the
+missing launcher. macOS is unchanged.
+
+### Launcher and profile
+
+On Linux every run is a child of `/usr/bin/bwrap` (bubblewrap). The profile is the bwrap argument
+vector itself, rendered per run by `render_bwrap_args` and stored NUL-joined as the profile blob, so
+`profile_digest` names exactly the arguments that were enforced. `exec.identity` reports the Linux
+system read roots and the digest of the argument template.
+
+| Seatbelt rule (macOS)                                   | bwrap equivalent (Linux)                                                                                             |
+| ------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| deny default                                            | fresh user, mount, PID, network, IPC, UTS and cgroup namespaces (`--unshare-all`)                                    |
+| read system roots, read roots, run directory            | `--ro-bind` of `/usr`, `/etc`, `/bin`, `/sbin`, `/lib*` and each read root; merged-`/usr` links recreated            |
+| write only the run directory and `/dev/null`            | `--bind` of the run directory; `--dev /dev`; the tmpfs root remounted read-only last                                 |
+| no network                                              | a private network namespace with only loopback                                                                       |
+| deny exec of `git`, `gh`, `git-*` and the `never` paths | `/dev/null` bound over `git`, `gh` and each `never` path in the bound roots; a read-only empty tmpfs over `git-core` |
+
+Two differences are deliberate and visible to callers:
+
+1. **Loopback.** A run may bind and connect on loopback inside its own network namespace. Nothing
+   outside the run can reach it and it can reach nothing outside, so the "no network" posture holds,
+   but a probe expecting `EPERM` sees an ordinary refused connection instead.
+2. **Name-based exec denial.** bwrap matches paths, not names. A `git` binary copied into the run
+   directory under any name still runs. Seatbelt already let a renamed copy run, so the guarantee of
+   Amendment 9 narrows only for a copy that keeps the name. Closing it needs Landlock or seccomp and is
+   not part of this amendment.
+
+### Descendants
+
+The tool runs as the child of PID 1 in its own PID namespace, and bwrap is started with
+`--die-with-parent`. When the tool exits, or the launcher is killed on timeout, every process left in
+the namespace is killed by the kernel, including descendants that called `setsid`. Amendment 11's
+detached survivor therefore cannot outlive a run on Linux. Receipts still report
+`process_cleanup.certification: unverified` and `tree_quiescence: unverified`; this amendment does not
+claim `certified_none` for the bwrap backend, which would need its own proof under Amendment 12.
+
+### Signals and limits (decision needed)
+
+bwrap's monitor reports a signalled tool as exit status `128 + signal`, so the waited child never
+shows the signal itself. To keep `exit_signal` and Amendment 6's `limiting_resource` meaningful, the
+Linux backend reads an exit code above 128 as signal `code - 128` and records `exit_code: null`.
+This is the exit-code inference Amendment 6 rules out: a tool that exits 137 on its own is recorded
+as killed by `SIGKILL`, and one that exits 152 under a CPU limit as `cpu_seconds`. The alternative is
+to record bwrap's status verbatim on Linux, which leaves `exit_signal` and `limiting_resource` always
+`null` there. This amendment proposes the decoding, with the ambiguity stated; the maintainers decide.
+
+Linux also sends `SIGKILL` rather than `SIGXCPU` when the CPU soft and hard limits are equal, which
+would make arm 37 unobservable on any Linux backend. The Linux launcher therefore sets the hard CPU
+limit one second above the soft limit; `enforced.cpu_seconds` still reports the soft limit.
+
+### Acceptance
+
+The arms gated to macOS run on Linux with bwrap, with these Linux expectations: the outbound-connect
+arm requires that the host listener is unreachable rather than `EPERM`; the loopback bind/listen arm
+and the two detached-survivor arms stay macOS-only; a new arm requires that a `setsid` descendant
+writes nothing after the run returns; the escaping-symlink arm accepts "Read-only file system". CI
+installs `bubblewrap` on the Linux shards.

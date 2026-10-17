@@ -33,7 +33,7 @@ use crate::capture::{drain_until, walk, CaptureRead, CaptureRoot, DrainStop, Dra
 use crate::membership::{MembershipWork, SuppliedRefs};
 use crate::process_cleanup::{ProcessCleanup, TreeQuiescence};
 use crate::receipts;
-use crate::sandbox::{self, check_binary, render_profile, Resolved};
+use crate::sandbox::{self, check_binary, Resolved};
 use crate::tree::{self, digest_hex, Change, TreeEntry};
 
 const MAX_RUN_INPUT_BYTES: u64 = 256 * 1024 * 1024;
@@ -1360,9 +1360,19 @@ fn encode_limit_report(
 
 #[cfg(unix)]
 fn set_and_read_limit(resource: RlimitResource, value: u64) -> std::io::Result<u64> {
+    // Linux sends SIGKILL, not SIGXCPU, when the CPU soft and hard limits are
+    // equal; one second of headroom keeps the limit's own signal observable.
+    #[cfg(target_os = "linux")]
+    let max = if resource == libc::RLIMIT_CPU {
+        value.saturating_add(1)
+    } else {
+        value
+    };
+    #[cfg(not(target_os = "linux"))]
+    let max = value;
     let lim = libc::rlimit {
         rlim_cur: value as libc::rlim_t,
-        rlim_max: value as libc::rlim_t,
+        rlim_max: max as libc::rlim_t,
     };
     let mut back = libc::rlimit {
         rlim_cur: 0,
@@ -1457,10 +1467,11 @@ async fn execute(
     }
 
     // Profile: rendered per run, stored as a blob, written beside the run
-    // directory for sandbox-exec to read, removed with it.
-    let profile = render_profile(&run_dir, &cfg.read_roots, &cfg.never);
-    let profile_ref = store.put(profile.clone().into_bytes()).await?;
+    // directory for the launcher to read, removed with it.
     let profile_path = root.join(format!("{}.sb", receipt.id));
+    let (profile, launch) =
+        sandbox::render_launch(&run_dir, &cfg.read_roots, &cfg.never, &profile_path);
+    let profile_ref = store.put(profile.clone().into_bytes()).await?;
     std::fs::write(&profile_path, &profile).map_err(|e| {
         RuntimeError::Unconfigured(format!("profile {}: {e}", profile_path.display()))
     })?;
@@ -1490,8 +1501,7 @@ async fn execute(
     };
     let mut command = Command::new(sandbox::SANDBOX_EXEC);
     command
-        .arg("-f")
-        .arg(&profile_path)
+        .args(&launch)
         .arg(&ready.registered)
         .args(&req.args)
         .env_clear()
@@ -1542,7 +1552,8 @@ async fn execute(
                 libc::close(limit_reader);
             }
             return Err(RuntimeError::Unconfigured(format!(
-                "spawning sandbox-exec for {}: {e}",
+                "spawning {} for {}: {e}",
+                sandbox::SANDBOX_EXEC,
                 ready.registered
             )));
         }
@@ -1579,11 +1590,10 @@ async fn execute(
     receipt.limits = json!({ "requested": cfg.limits.to_json(), "enforced": enforced });
     let status = match waited {
         Ok(Ok(status)) => {
-            use std::os::unix::process::ExitStatusExt;
             // Only the delivered signal for a configured limit is observable
             // here. ENOMEM/EAGAIN inside a child and generic SIGKILL are not
             // resource evidence; timeout keeps the initial explicit null.
-            receipt.limiting_resource = match status.signal() {
+            receipt.limiting_resource = match sandbox::tool_status(status).1 {
                 Some(libc::SIGXCPU) if cfg.limits.cpu_seconds.is_some() => Some("cpu_seconds"),
                 Some(libc::SIGXFSZ) if cfg.limits.file_size.is_some() => Some("file_size"),
                 _ => None,
@@ -1625,9 +1635,9 @@ async fn execute(
     }
 
     if let Some(status) = status {
-        use std::os::unix::process::ExitStatusExt;
-        receipt.exit_code = status.code().map(i64::from);
-        receipt.exit_signal = status.signal().map(i64::from);
+        let (code, signal) = sandbox::tool_status(status);
+        receipt.exit_code = code.map(i64::from);
+        receipt.exit_signal = signal.map(i64::from);
     }
 
     // Outputs.
