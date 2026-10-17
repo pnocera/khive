@@ -67,6 +67,7 @@ lattice-embed = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
 khive-fs = { version = "0.13.0", path = "../khive-fs" }
+libc = { workspace = true }
 
 [dev-dependencies]
 inventory = { workspace = true }

@@ -2,6 +2,13 @@
 //! downstream distributions can embed it with additional packs linked in.
 
 fn main() -> anyhow::Result<()> {
+    // khive refuses group- or other-writable store directories, so it must
+    // never create one: mask those bits whatever umask the caller set.
+    // SAFETY: umask only swaps the process mask; no thread exists yet to race it.
+    #[cfg(unix)]
+    unsafe {
+        libc::umask(libc::umask(0o022) | 0o022);
+    }
     #[cfg(all(
         target_pointer_width = "64",
         any(target_os = "linux", target_os = "macos")
