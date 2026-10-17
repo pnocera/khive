@@ -126,7 +126,7 @@ impl Fixture {
             .to_string()
     }
 
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     async fn register_shell(&self) {
         self.call(
             "tool.register",
@@ -143,7 +143,7 @@ impl Fixture {
         .await;
     }
 
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     async fn blob_bytes(&self, content_ref: &Value) -> Vec<u8> {
         use base64::Engine;
         let blob = self
@@ -284,7 +284,7 @@ async fn historical_exec_receipts_remain_uncertified_without_rewriting() {
     }
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 #[tokio::test]
 async fn process_cleanup_success_keeps_artifacts_and_matches_storage() {
     for cap in [0, 128] {
@@ -335,7 +335,7 @@ async fn process_cleanup_success_keeps_artifacts_and_matches_storage() {
     }
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 #[tokio::test]
 async fn process_cleanup_nonzero_exit_is_durable() {
     let fixture = Fixture::new(128, None);
@@ -357,7 +357,7 @@ async fn process_cleanup_nonzero_exit_is_durable() {
     fixture.assert_durable(receipt).await;
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 #[tokio::test]
 async fn process_cleanup_profile_storage_failure_is_durable() {
     let fail_next_put = Arc::new(AtomicBool::new(false));
@@ -387,7 +387,7 @@ async fn process_cleanup_profile_storage_failure_is_durable() {
     fixture.assert_durable(receipt).await;
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 #[tokio::test]
 async fn process_cleanup_timeout_is_durable() {
     let fixture = Fixture::new(128, None);

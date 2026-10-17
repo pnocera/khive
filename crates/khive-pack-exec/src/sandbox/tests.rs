@@ -14,7 +14,7 @@ fn check_backend_refuses_and_names_the_platform_when_absent() {
     let error = check_backend(missing).unwrap_err();
     assert!(error.contains(missing), "{error}");
     assert!(error.contains(std::env::consts::OS), "{error}");
-    assert!(error.contains("seatbelt"), "{error}");
+    assert!(error.contains(SANDBOX_NAME), "{error}");
 }
 
 #[test]
@@ -122,4 +122,43 @@ fn forbidden_basenames_refuse() {
         check_binary(other.to_str().unwrap(), &[]).unwrap(),
         canonical
     );
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn bwrap_confines_reads_writes_network_and_git() {
+    if !Path::new(SANDBOX_EXEC).exists() {
+        return;
+    }
+    let run = tempfile::tempdir().expect("run directory");
+    let outside = tempfile::tempdir().expect("outside directory");
+    let run_dir = std::fs::canonicalize(run.path()).expect("canonical run directory");
+    let secret = outside.path().join("secret");
+    std::fs::write(&secret, b"secret").expect("outside fixture");
+    let (profile, launch) = render_launch(&run_dir, &[], &[], Path::new("/"));
+    assert!(profile.contains("--unshare-all"), "{profile}");
+    let sh = |script: &str| {
+        std::process::Command::new(SANDBOX_EXEC)
+            .args(&launch)
+            .args(["/bin/sh", "-c", script])
+            .current_dir(&run_dir)
+            .output()
+            .expect("launch sandboxed sh")
+    };
+    assert!(
+        sh("echo ok > out").status.success(),
+        "run-tree write control"
+    );
+    assert_eq!(std::fs::read(run_dir.join("out")).unwrap(), b"ok\n");
+    let read = format!("cat {}", secret.display());
+    assert!(!sh(&read).status.success(), "outside read must fail");
+    assert!(
+        !sh("echo x > /etc/x").status.success(),
+        "system write must fail"
+    );
+    assert!(!sh("git --version").status.success(), "git must not run");
+    // Header lines plus loopback: the run's network namespace has nothing else.
+    let net = String::from_utf8_lossy(&sh("cat /proc/net/dev").stdout).to_string();
+    assert_eq!(net.lines().count(), 3, "{net}");
+    assert!(net.contains("lo:"), "{net}");
 }

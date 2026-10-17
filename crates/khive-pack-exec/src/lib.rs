@@ -4,7 +4,8 @@
 //! durable receipt per call, refusals included.
 //!
 //! The sandbox is macOS seatbelt (`sandbox-exec`) with a deny-default profile
-//! rendered from a fixed template; see [`sandbox`].
+//! rendered from a fixed template, or bubblewrap (`bwrap`) on Linux; see
+//! [`sandbox`].
 
 mod capture;
 mod handlers;

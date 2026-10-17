@@ -1,3 +1,5 @@
+// Both cases need a descendant that outlives the tool, which the Linux
+// backend's PID namespace kills; see verbs.rs for the Linux counterpart.
 #![cfg(target_os = "macos")]
 
 use khive_pack_blob::BlobPack;

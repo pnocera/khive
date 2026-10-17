@@ -200,7 +200,7 @@ impl Fixture {
         v["tree"].as_str().unwrap().to_string()
     }
 
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     async fn blob_text(&self, r: &Value) -> String {
         use base64::Engine;
         let v = self.call("blob.get", json!({ "content_ref": r })).await;
@@ -236,7 +236,7 @@ impl Fixture {
         registered
     }
 
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     async fn register_perl(&self) {
         self.call(
             "tool.register",
@@ -1227,7 +1227,7 @@ async fn run_refuses_symlink_cwd_pending_byte_budget_before_cycle() {
     assert!(!reason.contains("budget"), "{reason}");
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 #[tokio::test]
 async fn run_resolves_relative_symlink_cwd_chains_inside_the_manifest() {
     let f = fixture();
@@ -1265,6 +1265,9 @@ async fn run_resolves_relative_symlink_cwd_chains_inside_the_manifest() {
 #[cfg(all(unix, not(target_os = "macos")))]
 #[tokio::test]
 async fn run_refuses_a_host_without_a_sandbox_backend_and_names_the_platform() {
+    if std::path::Path::new(khive_pack_exec::sandbox::SANDBOX_EXEC).exists() {
+        return;
+    }
     let f = fixture();
     f.register_sh("sh", "allow").await;
     let tree = f.tree(&[("a-file", b"input", 644)]).await;
@@ -1291,7 +1294,10 @@ async fn run_refuses_a_host_without_a_sandbox_backend_and_names_the_platform() {
         .as_str()
         .expect("preflight refusal reason");
     assert!(reason.contains("no sandbox backend"), "{reason}");
-    assert!(reason.contains("/usr/bin/sandbox-exec"), "{reason}");
+    assert!(
+        reason.contains(khive_pack_exec::sandbox::SANDBOX_EXEC),
+        "{reason}"
+    );
     assert!(reason.contains(std::env::consts::OS), "{reason}");
     assert!(
         root_is_empty(&f),
@@ -1301,7 +1307,7 @@ async fn run_refuses_a_host_without_a_sandbox_backend_and_names_the_platform() {
 
 // Materialization is only reachable on a host that has a sandbox backend:
 // without one the run refuses in preflight, before any tree is written.
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 #[tokio::test]
 async fn run_materialize_symlink_failure_persists_receipt_and_cleans_up() {
     for keep in [false, true] {
@@ -1357,7 +1363,7 @@ async fn run_materialize_symlink_failure_persists_receipt_and_cleans_up() {
     }
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 #[tokio::test]
 async fn profile_blob_failure_after_materialization_persists_receipt_and_removes_run_dir() {
     let fail_next = Arc::new(AtomicBool::new(false));
@@ -1398,7 +1404,7 @@ async fn profile_blob_failure_after_materialization_persists_receipt_and_removes
     assert!(root_is_empty(&f), "the materialized input must be removed");
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 #[tokio::test]
 async fn input_hydration_failure_after_preflight_still_persists_a_receipt() {
     let fail_get_on_call = Arc::new(AtomicUsize::new(0));
@@ -1433,7 +1439,7 @@ async fn input_hydration_failure_after_preflight_still_persists_a_receipt() {
     assert!(root_is_empty(&f), "hydration cannot create a run directory");
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 #[tokio::test]
 async fn invalid_output_filename_is_skipped_and_published_tree_loads() {
     let f = fixture();
@@ -1460,7 +1466,7 @@ async fn invalid_output_filename_is_skipped_and_published_tree_loads() {
     assert_eq!(output["entries"], json!([]), "a minted tree must load");
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 #[tokio::test]
 async fn unreadable_output_directory_never_becomes_a_deletion_receipt() {
     use std::os::unix::fs::PermissionsExt;
@@ -1497,7 +1503,7 @@ async fn unreadable_output_directory_never_becomes_a_deletion_receipt() {
     assert!(reason.contains("exec cleanup failed"), "{reason}");
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 #[tokio::test]
 async fn run_capture_read_failure_persists_failed_receipt_and_cleans_up() {
     // chmod 000 must make a real read fail; a root test runner is not a
@@ -1552,7 +1558,7 @@ async fn run_capture_read_failure_persists_failed_receipt_and_cleans_up() {
     }
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 #[tokio::test]
 async fn run_captures_output_changes_and_receipt() {
     let f = fixture();
@@ -1642,7 +1648,7 @@ async fn run_captures_output_changes_and_receipt() {
     assert!(root_is_empty(&f));
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 #[tokio::test]
 async fn run_receipt_reports_first_registration_when_name_is_taken() {
     let f = fixture();
@@ -1685,7 +1691,7 @@ async fn run_receipt_reports_first_registration_when_name_is_taken() {
     assert_eq!(&runs["runs"][0], receipt);
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 #[tokio::test]
 async fn run_captures_symlink_creation_retargeting_removal_and_mode_flips() {
     let f = fixture();
@@ -1751,7 +1757,7 @@ async fn run_captures_symlink_creation_retargeting_removal_and_mode_flips() {
     );
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 #[tokio::test]
 async fn run_denies_writes_through_escaping_symlinks_and_allows_inside_targets() {
     use std::os::unix::ffi::OsStrExt;
@@ -1787,7 +1793,10 @@ async fn run_denies_writes_through_escaping_symlinks_and_allows_inside_targets()
         assert_eq!(receipt["denied"], false, "the tool was launched: {receipt}");
         let stderr = f.blob_text(&receipt["stderr_ref"]).await;
         assert!(
-            stderr.contains("ermitted") || stderr.contains("ermission"),
+            // bubblewrap mounts everything outside the run directory read-only.
+            stderr.contains("ermitted")
+                || stderr.contains("ermission")
+                || stderr.contains("Read-only file system"),
             "the kernel refusal must be reported in stderr: {stderr:?}"
         );
         assert_eq!(std::fs::read(&outside).unwrap(), b"unchanged");
@@ -1804,7 +1813,7 @@ async fn run_denies_writes_through_escaping_symlinks_and_allows_inside_targets()
     }
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 #[tokio::test]
 async fn run_generated_profile_refuses_outbound_tcp_connect() {
     const PROBE: &str = r#"
@@ -1848,18 +1857,26 @@ async fn run_generated_profile_refuses_outbound_tcp_connect() {
     let receipt = &out["receipt"];
     assert_eq!(receipt["denied"], false, "{receipt}");
     assert!(receipt["started_at"].is_string(), "{receipt}");
+    // Seatbelt refuses the connect; bubblewrap's private network namespace has
+    // no listener, so the host's port is unreachable rather than refused.
+    #[cfg(target_os = "macos")]
+    let (expected, profile_marker) = (42, "(deny default)");
+    #[cfg(target_os = "linux")]
+    let (expected, profile_marker) = (44, "--unshare-all");
     assert_eq!(
-        receipt["exit_code"], 42,
-        "connect must fail with EPERM/EACCES: {receipt}"
+        receipt["exit_code"], expected,
+        "connect must not reach the host listener: {receipt}"
     );
     assert_eq!(receipt["success"], false, "{receipt}");
     assert_eq!(receipt["sandbox"]["profile_digest"], receipt["profile_ref"]);
     assert!(f
         .blob_text(&receipt["profile_ref"])
         .await
-        .contains("(deny default)"));
+        .contains(profile_marker));
 }
 
+// bubblewrap allows loopback inside the run's own network namespace, where
+// nothing outside the run can reach it.
 #[cfg(target_os = "macos")]
 #[tokio::test]
 async fn run_generated_profile_refuses_loopback_bind_and_listen() {
@@ -1916,7 +1933,7 @@ async fn run_generated_profile_refuses_loopback_bind_and_listen() {
         .contains("(deny default)"));
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 #[tokio::test]
 async fn run_materialized_symlinks_round_trip_losslessly_through_git() {
     use std::os::unix::fs::symlink;
@@ -2054,7 +2071,7 @@ async fn run_materialized_symlinks_round_trip_losslessly_through_git() {
     assert!(patch.contains("new file mode 100644"), "{patch}");
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 #[tokio::test]
 async fn run_refuses_cwd_escape_and_drops_undeclared_changes() {
     let f = fixture();
@@ -2102,7 +2119,7 @@ async fn run_refuses_cwd_escape_and_drops_undeclared_changes() {
     );
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 #[tokio::test]
 async fn run_timeout_kills_the_group_and_output_tail_is_kept() {
     let f = fixture();
@@ -2131,7 +2148,7 @@ async fn run_timeout_kills_the_group_and_output_tail_is_kept() {
     assert_eq!(r["stdout_capture"], "incomplete");
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 #[tokio::test]
 async fn run_declared_paths_cover_prefixes_at_slash_boundaries_only() {
     let f = fixture();
@@ -2184,7 +2201,7 @@ async fn run_declared_paths_cover_prefixes_at_slash_boundaries_only() {
     assert_eq!(bak["ref"], json!(f.put(b"bak").await));
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 #[tokio::test]
 async fn concurrent_runs_in_one_session_get_distinct_seq() {
     let f = fixture();
@@ -2222,7 +2239,7 @@ async fn concurrent_runs_in_one_session_get_distinct_seq() {
     );
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 #[tokio::test]
 async fn run_denies_version_control_and_the_never_set_at_the_kernel() {
     let f = fixture();
@@ -2247,16 +2264,19 @@ async fn run_denies_version_control_and_the_never_set_at_the_kernel() {
         assert_eq!(receipt["success"], false, "{cmd}");
         let stderr = f.blob_text(&receipt["stderr_ref"]).await;
         assert!(
-            stderr.contains("ermitted") || stderr.contains("ermission"),
+            // bubblewrap mounts everything outside the run directory read-only.
+            stderr.contains("ermitted")
+                || stderr.contains("ermission")
+                || stderr.contains("Read-only file system"),
             "{cmd}: the kernel refusal is in stderr: {stderr:?}"
         );
     }
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 const LIMIT_SPIN: &str = "while :; do :; done";
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 fn observable_limits() -> ExecLimitsConfig {
     ExecLimitsConfig {
         cpu_seconds: Some(1),
@@ -2266,7 +2286,7 @@ fn observable_limits() -> ExecLimitsConfig {
 }
 
 /// Check the JSON key itself: indexing a missing key also produces Value::Null.
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 async fn check_limiting_resource(f: &Fixture, receipt: &Value, expected: Value) {
     assert_eq!(
         receipt.get("limiting_resource"),
@@ -2287,7 +2307,7 @@ async fn check_limiting_resource(f: &Fixture, receipt: &Value, expected: Value) 
     assert!(root_is_empty(f), "run directory and profile are cleaned up");
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 async fn limit_run(f: &Fixture, script: &str, timeout_s: f64) -> Value {
     f.register_sh("limit-sh", "allow").await;
     let tree = f.tree(&[]).await;
@@ -2300,7 +2320,7 @@ async fn limit_run(f: &Fixture, script: &str, timeout_s: f64) -> Value {
         .clone()
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 #[tokio::test]
 async fn limiting_resource_cpu_seconds_observed_on_wait() {
     let f = fixture_with_limits(false, observable_limits());
@@ -2314,7 +2334,7 @@ async fn limiting_resource_cpu_seconds_observed_on_wait() {
     check_limiting_resource(&f, &r, json!("cpu_seconds")).await;
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 #[tokio::test]
 async fn limiting_resource_file_size_observed_on_wait() {
     let f = fixture_with_limits(false, observable_limits());
@@ -2329,7 +2349,7 @@ async fn limiting_resource_file_size_observed_on_wait() {
     check_limiting_resource(&f, &r, json!("file_size")).await;
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 #[tokio::test]
 async fn limiting_resource_exit_zero_is_present_null() {
     let f = fixture_with_limits(false, observable_limits());
@@ -2340,7 +2360,7 @@ async fn limiting_resource_exit_zero_is_present_null() {
     check_limiting_resource(&f, &r, Value::Null).await;
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 #[tokio::test]
 async fn limiting_resource_sigterm_is_present_null() {
     let f = fixture_with_limits(false, observable_limits());
@@ -2351,7 +2371,7 @@ async fn limiting_resource_sigterm_is_present_null() {
     check_limiting_resource(&f, &r, Value::Null).await;
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 #[tokio::test]
 async fn limiting_resource_timeout_is_present_null() {
     let f = fixture_with_limits(false, observable_limits());
@@ -2362,7 +2382,7 @@ async fn limiting_resource_timeout_is_present_null() {
     check_limiting_resource(&f, &r, Value::Null).await;
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 #[tokio::test]
 async fn limiting_resource_spin_without_cpu_limit_reaches_timeout() {
     let f = fixture();
@@ -2373,7 +2393,7 @@ async fn limiting_resource_spin_without_cpu_limit_reaches_timeout() {
     check_limiting_resource(&f, &r, Value::Null).await;
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 #[tokio::test]
 async fn limiting_resource_requires_the_matching_configured_limit() {
     for (script, signal, limits) in [
@@ -2402,7 +2422,7 @@ async fn limiting_resource_requires_the_matching_configured_limit() {
     }
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 #[tokio::test]
 async fn limiting_resource_generic_sigkill_is_present_null() {
     let f = fixture_with_limits(false, observable_limits());
@@ -2412,7 +2432,7 @@ async fn limiting_resource_generic_sigkill_is_present_null() {
     check_limiting_resource(&f, &r, Value::Null).await;
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 #[tokio::test]
 async fn limiting_resource_nonzero_exit_is_present_null() {
     let f = fixture_with_limits(false, observable_limits());
@@ -2485,7 +2505,7 @@ async fn effective_output_cap_is_preserved_on_refusal_receipts() {
     }
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 #[tokio::test]
 async fn effective_output_cap_is_preserved_on_complete_receipts() {
     for cap in [17, 41] {
@@ -2510,7 +2530,7 @@ async fn effective_output_cap_is_preserved_on_complete_receipts() {
     }
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 #[tokio::test]
 async fn effective_output_cap_explains_truncated_receipts() {
     for cap in [0, 17] {
@@ -2548,4 +2568,26 @@ async fn effective_output_cap_explains_truncated_receipts() {
         }
         check_effective_output_cap(&f, receipt, cap).await;
     }
+}
+
+// The run's PID namespace ends with the tool: a descendant that left the
+// initial session dies with it instead of outliving the receipt.
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn run_kills_a_detached_descendant_with_the_run() {
+    let f = fixture_with_keep(true);
+    f.register_sh("sh", "allow").await;
+    let tree = f.tree(&[]).await;
+    let out = f
+        .call(
+            "exec.run",
+            json!({"tree":tree,"tool":"sh","actor":"local",
+                "args":["-c","/usr/bin/setsid /bin/sh -c 'sleep 1; echo late > survivor' & echo started"]}),
+        )
+        .await;
+    let receipt = &out["receipt"];
+    assert_eq!(receipt["success"], true, "{receipt}");
+    let run_dir = f.root.join(receipt["id"].as_str().unwrap());
+    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+    assert!(!run_dir.join("survivor").exists(), "{receipt}");
 }

@@ -183,7 +183,7 @@ impl Fixture {
         count(&self.blobs)
     }
 
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     async fn register_shell(&self) {
         self.call("tool.register", json!({"name":"sh","kind":"tool","description":"shell","source":"exec:/bin/sh","side_effect":"write","trust":"first_party"})).await;
         self.call(
@@ -395,7 +395,7 @@ fn coverage_shared_prefix_build_and_long_deletion_queries_are_bounded() {
     assert_eq!(state.queries, 2);
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 #[tokio::test]
 async fn declared_work_is_observed_on_public_capture_and_deletions() {
     let f = Fixture::new();
@@ -439,7 +439,7 @@ async fn declared_work_is_observed_on_public_capture_and_deletions() {
     assert!(work.build_bytes > 0 && work.build_lookups > 0);
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 #[tokio::test]
 async fn public_coverage_preserves_none_empty_unicode_and_old_content() {
     for declared in [

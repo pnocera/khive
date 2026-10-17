@@ -463,6 +463,10 @@ jobs:
         run: ../scripts/ci.sh clippy
       # Rustdoc is already the separately gated doc-build job below; keep it in
       # ci.sh's local all-mode without paying for duplicate per-OS CI builds.
+      # exec.run's Linux backend; the exec pack's run tests launch real sandboxes.
+      - name: Install bubblewrap (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get install -y --no-install-recommends bubblewrap
       - name: Install cargo-nextest
         if: env.CI_SUITE == 'full'
         uses: taiki-e/install-action@9e1e5806d4a4822de933115878265be9aaa786d9 # v2.82.2
